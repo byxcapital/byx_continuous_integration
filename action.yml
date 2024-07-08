@@ -1,0 +1,89 @@
+name: 'Executar Testes, Pre-Commit e SonarCloud'
+description: 'Ação para rodar testes Django, hooks pre-commit e análise SonarCloud'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements.testing.txt
+        pip install pre-commit
+        pip install coverage
+      shell: bash
+
+    - name: Run pre-commit
+      run: pre-commit run --all-files
+      shell: bash
+
+    - name: Start Redis and set locale
+      run: |
+        sudo apt update
+        sudo apt-get install libenchant-2-2 -y
+        sudo apt-get install redis-server -y
+        sudo service redis-server start
+        sudo apt-get install locales -y
+        echo "pt_BR.UTF-8 UTF-8" | sudo tee -a /etc/locale.gen
+        sudo locale-gen pt_BR.UTF-8
+      shell: bash
+
+    - name: Load cached venv
+      id: cached-dependencies
+      uses: actions/cache@v3
+      with:
+        path: venv
+        key: venv-${{ hashFiles('**/requirements.txt') }}-${{ hashFiles('**/requirements.testing.txt') }}
+
+    - name: Setup venv
+      if: steps.cached-dependencies.outputs.cache-hit != 'true'
+      run: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+        pip install -r requirements.testing.txt
+      shell: bash
+
+    - name: Run Tests
+      run: |
+        source venv/bin/activate
+        make test
+      env:
+        LANG: ${{ env.LANG }}
+        LANGUAGE: ${{ env.LANGUAGE }}
+        LC_ALL: ${{ env.LC_ALL }}
+      shell: bash
+
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+
+    - name: Run tests with coverage
+      run: |
+        source venv/bin/activate
+        coverage run --source='.' manage.py test
+        coverage xml
+      shell: bash
+
+    - name: Upload coverage report to SonarCloud
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.organization=${{ env.ORGANIZATION_SONAR }}
+          -Dsonar.projectKey=${{ env.PROJECT_KEY_SONAR }}
+          -Dsonar.python.coverage.reportPaths=coverage.xml
