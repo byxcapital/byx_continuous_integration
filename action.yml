@@ -73,7 +73,7 @@ runs:
     - name: Run tests with coverage
       run: |
         source venv/bin/activate
-        coverage run --source='.' manage.py test
+        coverage run --source='.' manage.py test --settings=core.testing
         coverage xml
       shell: bash
 
